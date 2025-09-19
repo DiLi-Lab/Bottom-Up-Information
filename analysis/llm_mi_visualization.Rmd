@@ -1,0 +1,292 @@
+---
+title: "LLM MI visualization"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, echo=TRUE, results='hide', warning=FALSE, message=FALSE, eval=TRUE}
+shhh <- suppressPackageStartupMessages
+
+shhh(library(dplyr))
+shhh(library(ggplot2))
+shhh(library(ggrepel))
+shhh(library(forcats))
+shhh(library(ggcorrplot))
+shhh(library(cowplot))
+shhh(library(lme4))
+shhh(library(lmerTest))
+shhh(library(tidyr))
+shhh(library(stringr))
+shhh(library(HDInterval))
+shhh(library(MASS))
+shhh(library(brms))
+shhh(library(boot))
+shhh(library(purrr))
+shhh(library(mgcv))
+shhh(library(rsample))
+shhh(library(gridExtra))
+shhh(library(cmdstanr))
+```
+
+
+```{r}
+Baseline_lower <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/ZH/char/onestop_baseline/bayesian_baseline_zh_lower_exp_10.0.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "l",
+         model = "Baseline")
+
+Baseline_upper <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/ZH/char/onestop_baseline/bayesian_baseline_zh_upper_exp_10.0.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "u",
+         model = "Baseline")
+
+Baseline_whole <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/ZH/char/onestop_baseline/bayesian_baseline_zh_whole_exp_10.0.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "f",
+         model = "Baseline")
+
+Qwen_zeroshot_lower <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/ZH/char/onestop/lower/zero_shot_onestop_zh_char_lower.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "l",
+         model = "Qwen-Zeroshot")
+
+Qwen_zeroshot_upper <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/ZH/char/onestop/upper/zero_shot_onestop_zh_char_upper.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "u",
+         model = "Qwen-Zeroshot")
+
+Qwen_zeroshot_whole <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/ZH/char/onestop/whole/zero_shot_onestop_zh_char_whole.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "f",
+         model = "Qwen-Zeroshot")
+
+Qwen_finetune_lower <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/ZH/char/onestop/lower/finetuned_onestop_zh_char_lower.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "l",
+         model = "Qwen-Finetune")
+
+Qwen_finetune_upper <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/ZH/char/onestop/upper/finetuned_onestop_zh_char_upper.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "u",
+         model = "Qwen-Finetune")
+
+Qwen_finetune_whole <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/ZH/char/onestop/whole/finetuned_onestop_zh_char_whole.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "f",
+         model = "Qwen-Finetune")
+
+trocr_finetune_lower <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Bottom-Up-Information/data/LLM/ZH/char/tr-ocr/zh_onestop_lower.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "l",
+         model = "TrOCR")
+
+trocr_finetune_upper <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Bottom-Up-Information/data/LLM/ZH/char/tr-ocr/zh_onestop_upper.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "u",
+         model = "TrOCR")
+
+trocr_finetune_whole <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Bottom-Up-Information/data/LLM/ZH/char/tr-ocr/zh_onestop_whole.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "f",
+         model = "TrOCR")
+
+zh_mi <- bind_rows(Baseline_lower, Baseline_upper, Baseline_whole, Qwen_zeroshot_lower, Qwen_zeroshot_upper, Qwen_zeroshot_whole, Qwen_finetune_lower, Qwen_finetune_upper, Qwen_finetune_whole, trocr_finetune_lower, trocr_finetune_upper, trocr_finetune_whole)
+
+zh_mi <- zh_mi %>%
+  mutate(
+    uncond_ent = case_when(
+      model == "TrOCR" ~ 5.59,   # 8.16, if count the trOCR performance as random guessing, 5.25 if take into account freq.
+      TRUE ~ 5.59
+    ),
+    vmi = pmax(uncond_ent - vent, 0),
+    language = "ZH-CN"
+  )
+View(zh_mi)
+```
+
+
+```{r}
+Baseline_lower <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/EN/words/onestop_baseline/bayesian_baseline_en_lower_exp_10.0.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "l",
+         model = "Baseline")
+
+Baseline_upper <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/EN/words/onestop_baseline/bayesian_baseline_en_upper_exp_10.0.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "u",
+         model = "Baseline")
+
+Baseline_whole <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/EN/words/onestop_baseline/bayesian_baseline_en_whole_exp_10.0.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "f",
+         model = "Baseline")
+
+Qwen_zeroshot_lower <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/EN/words/onestop/lower/zero_shot_en_word_lower.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "l",
+         model = "Qwen-Zeroshot")
+
+Qwen_zeroshot_upper <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/EN/words/onestop/upper/zero_shot_en_word_upper.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "u",
+         model = "Qwen-Zeroshot")
+
+Qwen_zeroshot_whole <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/EN/words/onestop/whole/zero_shot_en_word_whole.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "f",
+         model = "Qwen-Zeroshot")
+
+Qwen_finetune_lower <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/EN/words/onestop/lower/finetune_en_word_lower_best.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "l",
+         model = "Qwen-Finetune")
+
+Qwen_finetune_upper <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/EN/words/onestop/upper/finetune_en_word_upper_best.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "u",
+         model = "Qwen-Finetune")
+
+Qwen_finetune_whole <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/data/LLM/EN/words/onestop/whole/finetune_en_word_whole_best.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "f",
+         model = "Qwen-Finetune")
+
+trocr_finetune_lower <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Bottom-Up-Information/data/LLM/EN/words/tr-ocr/en_onestopqa_lower.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "l",
+         model = "TrOCR")
+
+trocr_finetune_upper <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Bottom-Up-Information/data/LLM/EN/words/tr-ocr/en_onestopqa_upper.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "u",
+         model = "TrOCR")
+
+trocr_finetune_whole <- read.csv("/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Bottom-Up-Information/data/LLM/EN/words/tr-ocr/en_onestopqa_whole.csv") %>%
+  dplyr::select(target, entropy) %>%
+  rename(word = target,
+         vent = entropy) %>%
+  mutate(rev = "f",
+         model = "TrOCR")
+
+en_mi <- bind_rows(Baseline_lower, Baseline_upper, Baseline_whole, Qwen_zeroshot_lower, Qwen_zeroshot_upper, Qwen_zeroshot_whole, Qwen_finetune_lower, Qwen_finetune_upper, Qwen_finetune_whole, trocr_finetune_lower, trocr_finetune_upper, trocr_finetune_whole)
+
+en_mi <- en_mi %>% 
+  mutate(
+    uncond_ent = case_when(
+      model == "TrOCR" ~ 7.12,
+      TRUE ~ 7.12,
+    )) %>%
+  mutate(vmi = pmax(uncond_ent - vent, 0),
+         language = "EN")
+
+View(en_mi)
+```
+
+
+
+```{r}
+zhen_mi <- rbind(zh_mi, en_mi) 
+
+zhen_mi <- zhen_mi %>%
+  mutate(
+         rev = factor(rev, levels = c("f", "u", "l"), labels = c("Full", "Upper", "Lower")),
+         language = factor(language, levels = c("ZH-CN", "EN"), labels = c("ZH", "EN")),
+         model = factor(model, levels = c("Baseline", "Qwen-Zeroshot", "Qwen-Finetune", "TrOCR"), labels = c("Baseline", "Qwen2.5-Zeroshot", "Qwen2.5-Finetuned", "TransOCR"))
+         
+         )
+View(zhen_mi)
+
+colnames(zhen_mi)
+
+# write.csv(zhen_mi, "/Users/cui/Documents/uzh/PhD/Projects/Re-Veil/Re-Veil/analysis/precomputed/zhen_mi.csv")
+```
+
+```{r}
+plot_df <- zhen_mi #%>%
+  # filter(model != "Qwen2.5-Zeroshot")
+
+ggplot(plot_df, aes(x = rev, y = vmi, fill = rev)) +
+  geom_boxplot(
+    outlier.shape = NA,
+    color = "gray30",
+    alpha = 0.8,
+    linewidth = 0.5
+  ) +
+  facet_grid(language ~ model, scales = "free_y") +
+  theme_light(base_size = 13) +
+  labs(
+    title = NULL,
+    x = NULL,
+    y = "IG of Word ID and Visual Input (nats)",
+    fill = "Visibility"
+  ) +
+  scale_fill_brewer(palette = "Set2") +
+  theme(
+    strip.background = element_rect(fill = "gray85", color = "black", linewidth = 1),
+    strip.text = element_text(size = 12, color = "black"),
+    axis.text.x = element_text(size = 13),
+    axis.text.y = element_text(size = 13),
+    legend.text = element_text(size = 13),
+    legend.title = element_text(size = 13),
+    legend.position = "bottom",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+ggsave("./visualization/mi_word_visual_pair_inc_zeroshot.pdf", width = 8, height = 4.5)
+
+```
+
+
+```{r}
+
+```
+

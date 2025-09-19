@@ -1,0 +1,612 @@
+---
+title: "LLM MI vs. Human reading data"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, echo=TRUE, results='hide', warning=FALSE, message=FALSE, eval=TRUE}
+shhh <- suppressPackageStartupMessages
+
+shhh(library(dplyr))
+shhh(library(ggplot2))
+shhh(library(ggrepel))
+shhh(library(forcats))
+shhh(library(ggcorrplot))
+shhh(library(cowplot))
+shhh(library(lme4))
+shhh(library(lmerTest))
+shhh(library(tidyr))
+shhh(library(stringr))
+shhh(library(HDInterval))
+shhh(library(MASS))
+shhh(library(brms))
+shhh(library(boot))
+shhh(library(purrr))
+shhh(library(mgcv))
+shhh(library(ppcor))
+shhh(library(gratia))
+shhh(library(rsample))
+shhh(library(gridExtra))
+shhh(library(cmdstanr))
+```
+
+
+# Read in MoTR Data
+```{r ZH-Data, echo=TRUE, warning=FALSE, eval=TRUE}
+# The path to the zh data
+zh_path <- "../data/Human/zh/rm-zh-chr"
+zh_names <- list.files(zh_path)
+
+# Read in the data from each participant and add to the data frame
+zh_df <- data.frame()
+for(name in zh_names){
+  subj <- gsub("reader_", "", gsub("_reading_measures.csv", "", name))
+  temp_df <- read.csv(paste0(zh_path, "/", name)) %>%
+    mutate(subj_id = paste0("s", subj),
+           stim_id = paste0("t", stim_id)) %>%
+    rename(word_id = exp_word_id,
+           subj = subj_id,
+           easiness = difficulty)
+  zh_df <- rbind(zh_df, temp_df)
+} 
+
+# View(zh_df)
+```
+
+
+```{r}
+zh_rt <- zh_df %>%
+  dplyr::select(expr_id, subj, stim_id, item_id, trial_id, word, word_id, word_len, zipf_freq, surp, renyi, rev, easiness, first_duration, total_duration, gaze_duration, go_past_time, FPFix, FPReg, RegIn_incl, NFix) %>%
+  mutate(
+    across(
+      c(first_duration, total_duration, gaze_duration, go_past_time, FPFix, FPReg, RegIn_incl, NFix),
+      ~ if_else(total_duration == 0, NA_real_, .)
+    )
+  ) %>%
+  mutate(skip = if_else(FPFix == 1, 0, 1),
+         easiness = if_else(easiness == "top", "Upper", "Lower")) %>%
+  mutate(msurp = surp / word_len,
+         mrenyi = renyi / word_len
+         ) %>%
+  dplyr::select(-surp, -renyi) %>%
+  mutate(
+    rev = factor(rev, levels = c("f", "u", "l"), labels = c("Full", "Upper", "Lower")),
+    easiness = factor(easiness, levels = c("Upper", "Lower")),
+    expr_id = factor(expr_id, levels = c("zh1", "en1"), labels = c("ZH", "EN")),
+    subj_id = as.numeric(factor(subj, levels = unique(subj)))
+    ) %>%
+  rename(len = word_len,
+         freq = zipf_freq,
+         surp = msurp,
+         renyi = mrenyi
+         ) %>%
+  filter(freq > 0) %>%
+  drop_na()
+
+# View(zh_rt)
+```
+
+```{r}
+en_path <- "../data/Human/en/rm_may"
+en_names <- list.files(en_path)
+
+# Read in the data from each participant and add to the data frame
+en_df <- data.frame()
+for(name in en_names){
+  subj <- gsub("reader_", "", gsub("_reading_measures.csv", "", name))
+  temp_df <- read.csv(paste0(en_path, "/", name)) %>%
+    mutate(subj_id = paste0("s", subj),
+           stim_id = paste0("t", stim_id)) %>%
+    rename(word_id = exp_word_id,
+           subj = subj_id,
+           easiness = difficulty)
+  en_df <- rbind(en_df, temp_df)
+}
+
+```
+
+
+```{r}
+en_rt <- en_df %>%
+  dplyr::select(expr_id, subj, stim_id, item_id, trial_id, word_id, word, word_len, zipf_freq, msurp, mrenyi, rev, easiness, first_duration, total_duration, gaze_duration, go_past_time, FPFix, FPReg, RegIn_incl, NFix) %>%
+  mutate(
+    across(
+      c(first_duration, total_duration, gaze_duration, go_past_time, FPFix, FPReg, RegIn_incl, NFix),
+      ~ if_else(total_duration == 0, NA_real_, .)
+    )
+  ) %>%
+  mutate(skip = if_else(FPFix == 1, 0, 1),
+         easiness = if_else(easiness == "top", "Upper", "Lower")) %>%
+  mutate(
+    rev = factor(rev, levels = c("f", "u", "l"), labels = c("Full", "Upper", "Lower")),
+    easiness = factor(easiness, levels = c("Upper", "Lower")),
+    expr_id = factor(expr_id, levels = c("zh1", "en1"), labels = c("ZH", "EN")),
+    subj_id = as.numeric(factor(subj, levels = unique(subj)))
+    ) %>%
+  rename(len = word_len, 
+         freq = zipf_freq,
+         surp = msurp,
+         renyi = mrenyi,
+         ) %>%
+  # filter(!is.na(total_duration)) %>%
+  filter(freq > 0) %>%
+  drop_na()
+```
+
+```{r}
+zhen_rt <- rbind(zh_rt, en_rt) 
+
+zhen_mi <- read.csv("./precomputed/zhen_mi.csv") %>% 
+  dplyr::select(language, word, model, vmi, rev) %>%
+    pivot_wider(
+    names_from = model,
+    names_prefix = "VMI_",
+    values_from = vmi
+  ) %>%
+  rename(vmi_baseline = `VMI_Baseline`,
+         vmi_qwenzt = `VMI_Qwen2.5-Zeroshot`,
+         vmi_qwenft = `VMI_Qwen2.5-Finetuned`,
+         vmi_transocr = `VMI_TransOCR`) 
+
+zhen_rt <- zhen_rt %>%
+  rename(language = expr_id) %>%
+  mutate(word = str_replace_all(word, "\\p{P}+", ""),
+         msubj_id = as.numeric(factor(subj, levels = unique(subj))),
+         rev = factor(rev, levels = c("Full", "Upper", "Lower"), labels = c("Full", "Upper", "Lower")),
+         easiness = factor(easiness, levels = c("Upper", "Lower")),
+         language = factor(language, levels = c("ZH", "EN"), labels = c("ZH", "EN"))
+         ) %>%
+  left_join(zhen_mi, by = c("language", "rev", "word"))
+
+# View(zhen_rt)
+```
+
+```{r}
+# human gaze duration vs. experimental condition --ZH
+zh <- zhen_rt %>%
+  filter(language == "ZH") %>%
+  mutate(rev = factor(rev, levels = c("Full", "Upper", "Lower"), labels = c("Full", "Upper", "Lower")))
+
+contrasts(zh$rev) <- contr.sdif(levels(zh$rev))
+
+m1 <- lmer(gaze_duration ~ rev + freq + surp + renyi + (1 | subj_id) + (1 | item_id), data = zh)
+summary(m1)
+
+```
+
+```{r}
+# human gaze duration vs. experimental condition -- EN
+en <- zhen_rt %>%
+  filter(language == "EN") %>%
+  mutate(rev = factor(rev, levels = c("Full", "Upper", "Lower"), labels = c("Full", "Upper", "Lower")))
+
+contrasts(en$rev) <- contr.sdif(levels(en$rev))
+
+m2 <- lmer(gaze_duration ~ len + rev + freq + surp + renyi + (1 | subj_id) + (1 | item_id), data = en)
+summary(m2)
+
+```
+
+
+```{r}
+# MI vs. experimental condition
+
+mi_rev = data.frame()
+measure_types = c("vmi_baseline", "vmi_qwenzt", "vmi_qwenft", "vmi_transocr")
+languages = c("ZH", "EN")
+
+for (lang in languages) {
+  temp <- zhen_rt %>% 
+    filter(language == lang) %>% 
+    mutate(rev = factor(rev, levels = c("Full", "Upper", "Lower"),
+                        labels = c("Full", "Upper", "Lower")))
+  
+  contrasts(temp$rev) <- contr.sdif(levels(temp$rev))
+  
+  for (meas in measure_types) {
+    print(paste("Fitting model for:", lang, "--", meas))
+    
+    # Choose formula depending on language
+    if (lang == "ZH") {
+      formula_text <- paste0(meas, " ~ rev + freq + surp + renyi + (1 | item_id)")
+      beta_names <- c("b_0", "b_UvsF", "b_LvsU", "b_freq", "b_surp", "b_renyi")
+    } else {
+      formula_text <- paste0(meas, " ~ rev + len + freq + surp + renyi + (1 | item_id)")
+      beta_names <- c("b_0", "b_UvsF", "b_LvsU", "b_len", "b_freq", "b_surp", "b_renyi")
+    }
+    
+    model_formula <- as.formula(formula_text)
+    
+    # Fit model
+    model <- temp %>% 
+      filter(!is.na(.data[[meas]])) %>% 
+      lmer(model_formula, data = ., REML = FALSE)
+    
+    coefs <- summary(model)$coefficients
+    
+    # Store results
+    temp_results <- data.frame(
+      language = lang,
+      measure = meas,
+      beta = beta_names,
+      bval = coefs[, "Estimate"],
+      pval = coefs[, "Pr(>|t|)"]
+    )
+    
+    mi_rev <- rbind(mi_rev, temp_results)
+  }
+}
+
+# Add significance markers
+mi_rev <- mi_rev %>%
+  mutate(sig = if_else(pval < 0.05, "SIG", if_else(pval < 0.1, ".", "")))
+
+mi_rev
+
+# write.csv(mi_rev, "./stats/mi_rev.csv", row.names = FALSE)
+
+```
+
+```{r}
+rt_mi = data.frame()
+# measure_types = c("gaze_duration", "go_past_time", "total_duration")
+measure_types = c("gaze_duration")
+languages = c("ZH", "EN")
+mi_type = c("vmi_baseline", "vmi_qwenzt", "vmi_qwenft", "vmi_transocr")
+
+# measure_types = c("gaze_duration")
+# languages = c("ZH")
+# mi_type = c("vmi_qwenzt")
+
+for (lang in languages){
+  temp <- zhen_rt %>% 
+      filter(language == lang )
+    for(mi in mi_type){
+        for (meas in measure_types){
+          print(paste("Fitting model for:", lang, "-- ", meas))
+          
+          if (lang == "ZH") {
+            formula_text <- paste0(meas, " ~ freq + surp + renyi + ", mi, " + (1 | subj_id) + (1 | item_id)")
+          } else {
+            formula_text <- paste0(meas, " ~ len + freq + surp + renyi + ", mi, " + (1 | subj_id) + (1 | item_id)")
+          }
+          model_formula <- as.formula(formula_text)
+          print(model_formula)
+          
+          if (meas %in% c("gaze_duration", "go_past_time", "total_duration")){
+            m1 <- temp %>% filter(!is.na(.data[[meas]]), .data[[meas]] > 0) %>% 
+              lmer(model_formula, data = ., REML = F)
+            coefs <- summary(m1)$coefficients
+          }else{
+              m1 <- temp %>% filter(!is.na(.data[[meas]])) %>% 
+                glmer(model_formula, data = ., family=binomial(link = "logit"))
+              coefs <- summary(m1)$coefficients
+          }
+          print(coefs)
+          if (lang == "ZH") {
+            temp_results <- data.frame(
+              language =lang,
+              measure = meas,
+              model_mi = mi,
+              beta = c("b_0", "b_freq", "b_surp", "b_renyi", "b_mi"),
+              bval = coefs[, "Estimate"],
+              pval = coefs[, "Pr(>|t|)"])
+          } else {
+            temp_results <- data.frame(
+              language =lang,
+              measure = meas,
+              model_mi = mi,
+              beta = c("b_0", "b_len", "b_freq", "b_surp", "b_renyi", "b_mi"),
+              bval = coefs[, "Estimate"],
+              pval = coefs[, "Pr(>|t|)"])
+          }
+           rt_mi = rbind(rt_mi, temp_results)
+      }
+      
+    }
+    
+}
+
+rt_mi = rt_mi %>%
+  mutate(sig = if_else(pval < 0.05, "SIG", ifelse(pval < .1, ".", "")))
+
+rt_mi
+# write.csv(rt_mi, "./stats/rt_mi.csv", row.names = FALSE)
+```
+
+```{r}
+tmp_zh <- zhen_rt %>% 
+  filter(language == "EN")
+
+
+cor.test(tmp_zh$freq, tmp_zh$vmi_qwenzt)
+cor.test(tmp_zh$freq, tmp_zh$vmi_qwenft)
+cor.test(tmp_zh$freq, tmp_zh$vmi_transocr)
+cor.test(tmp_zh$surp, tmp_zh$vmi_qwenzt)
+cor.test(tmp_zh$surp, tmp_zh$vmi_qwenft)
+cor.test(tmp_zh$surp, tmp_zh$vmi_transocr)
+cor.test(tmp_zh$renyi, tmp_zh$vmi_qwenzt)
+cor.test(tmp_zh$renyi, tmp_zh$vmi_qwenft)
+cor.test(tmp_zh$renyi, tmp_zh$vmi_transocr)
+
+```
+
+
+
+```{r}
+rt_mi_agg <- zhen_rt %>%
+  group_by(language, stim_id, item_id, word_id, word, rev) %>%
+  # mutate(across(
+  #   c(first_duration, total_duration, gaze_duration, go_past_time),
+  #   ~ ifelse(abs(.x - mean(.x, na.rm = TRUE)) > 3 * sd(.x, na.rm = TRUE), NA, .x)
+  # )) %>%
+  summarise(
+    across(c(first_duration, total_duration, gaze_duration, go_past_time,
+             FPFix, FPReg, RegIn_incl, NFix, skip), ~mean(.x, na.rm = TRUE)),
+    len   = first(len),
+    freq  = first(freq),
+    surp  = first(surp),
+    renyi = first(renyi),
+    vmi_baseline = first(vmi_baseline),
+    vmi_qwenzt = first(vmi_qwenzt),
+    vmi_qwenft = first(vmi_qwenft),
+    vmi_transocr = first(vmi_transocr),
+    .groups = "drop"
+  ) %>% pivot_longer(
+    cols = c(total_duration, gaze_duration, go_past_time),
+    names_to = "measure",
+    values_to = "value"
+  ) %>%
+  drop_na()
+
+colnames(rt_mi_agg)
+
+# View(rt_mi_agg)
+```
+
+```{r}
+en_temp <- rt_mi_agg %>%
+  filter(language == "EN")
+# View(en_temp)
+summary(en_temp$vmi_transocr)
+
+hist(en_temp$vmi_transocr, breaks = 30, col = "lightblue", main = "Histogram of vmi_qwenft", xlab = "vmi_qwenft")
+ggplot(en_temp, aes(x = vmi_transocr)) +
+  geom_density(fill = "lightgreen", alpha = 0.5) +
+  labs(title = "Density of vmi_qwenft", x = "vmi_qwenft", y = "Density") +
+  theme_minimal()
+
+```
+
+```{r}
+zh_temp <- rt_mi_agg %>%
+  filter(language == "ZH")
+# View(zh_temp)
+summary(zh_temp$vmi_qwenft)
+
+hist(zh_temp$vmi_qwenft, breaks = 30, col = "lightblue", main = "Histogram of vmi_qwenft", xlab = "vmi_qwenft")
+ggplot(zh_temp, aes(x = vmi_qwenft)) +
+  geom_density(fill = "lightgreen", alpha = 0.5) +
+  labs(title = "Density of vmi_qwenft", x = "vmi_qwenft", y = "Density") +
+  theme_minimal()
+```
+
+
+```{r}
+fit_gam_inner <- function(bootstrap_sample, mean_predictors, target_predictor, language) {
+  df <- bootstrap_sample$data
+  weights <- tabulate(as.integer(bootstrap_sample), nrow(df))
+
+  if (language == "EN") {
+    formula_text <- paste0(
+      "value ~ s(", target_predictor, ", bs = 'cr', k = 6) + ",
+      "te(freq, len, bs = 'cr') + ",
+      "te(surp, len, bs = 'cr') + ",
+      "te(renyi, len, bs = 'cr')"
+    )
+    newdata <- expand.grid(
+      len = mean_predictors$len,
+      freq = mean_predictors$freq,
+      surp = mean_predictors$surp,
+      renyi = mean_predictors$renyi,
+      x = seq(0, 7, by = 0.1)
+    )
+    colnames(newdata)[colnames(newdata) == "x"] <- target_predictor
+  } else {
+    formula_text <- paste0(
+      "value ~ s(", target_predictor, ", bs = 'cr', k = 6) + ",
+      "s(freq, bs = 'cr') + ",
+      "s(surp, bs = 'cr') + ",
+      "s(renyi, bs = 'cr')"
+    )
+    newdata <- expand.grid(
+      freq = mean_predictors$freq,
+      surp = mean_predictors$surp,
+      renyi = mean_predictors$renyi,
+      x = seq(0, 5.5, by = 0.1)
+    )
+    colnames(newdata)[colnames(newdata) == "x"] <- target_predictor
+  }
+  
+  formula <- as.formula(formula_text)
+  m <- gam(formula, data = df, weights = weights)
+
+  # Predict the partial effect of the target predictor
+  term_label <- paste0("s(", target_predictor, ")")
+  per_term_predictions <- predict(m, newdata = newdata, terms = term_label, type = "terms")
+  predictions <- rowSums(per_term_predictions)
+
+  return(newdata %>% mutate(y = predictions))
+}
+
+fit_gam = function(df, mean_predictors, target_predictor, lang, alpha=0.05) {
+  # Bootstrap-resample data
+  boot_models = df %>% bootstraps(times=20) %>% 
+   # Fit a GAM and get predictions for each sample
+    mutate(smoothed=map(splits, fit_gam_inner, mean_predictors=mean_predictors, target_predictor=target_predictor, language=lang))
+  
+  result = boot_models %>%
+    unnest(smoothed) %>%
+    mutate(
+      range = .data[[target_predictor]]
+    ) %>%
+    dplyr::select(range, y) %>%
+    group_by(range) %>%
+    summarise(y_lower=quantile(y, alpha / 2), 
+          y_upper=quantile(y, 1 - alpha / 2),
+          y=mean(y),
+          .groups = "drop")
+  
+  return (result)
+}
+
+```
+
+
+```{r}
+smooths_df = data.frame()
+
+predictors <- c("vmi_baseline", "vmi_qwenzt", "vmi_qwenft", "vmi_transocr")
+languages <- c("ZH", "EN")
+# measures <- c("gaze_duration", "total_duration", "go_past_time")
+measures <- c("gaze_duration")
+
+
+for (pred in predictors) {
+   for (lang in languages) {
+      for (m in measures) {
+       print(paste0("Fitting model for ", lang, ", ", m, ", ", "using: ", predictors))
+       dummy_df = rt_mi_agg %>% 
+         filter(measure == m & language == lang) %>%
+         filter(value > 0)
+       # View(dummy_df)
+      if (lang == "EN") {
+        mean_predictors <- dummy_df %>%
+          summarise(
+            len = mean(len, na.rm = TRUE),
+            surp  = mean(surp, na.rm = TRUE),
+            freq  = mean(freq, na.rm = TRUE),
+            renyi = mean(renyi, na.rm = TRUE),
+          )
+      } else {
+        mean_predictors <- dummy_df %>%
+          summarise(
+            surp  = mean(surp, na.rm = TRUE),
+            freq  = mean(freq, na.rm = TRUE),
+            renyi = mean(renyi, na.rm = TRUE),
+          )
+      }
+       smooths <- dummy_df %>% fit_gam(., mean_predictors, pred, lang)
+       # View(smooths)
+       gam_smooths <- smooths %>% mutate(delta = 0 - tail(y, 1), y=y + delta, y_lower= y_lower + delta, y_upper=y_upper + delta)
+       smooths_df = rbind(smooths_df, gam_smooths %>%
+                            mutate(language = lang,
+                              predictor = pred,
+                              psychometric = m)
+                          )
+     }  
+   }
+}
+# View(smooths_df)
+# write.csv(smooths_df, "./precomputed/vmi_rt_relation_range_zero.csv")
+```
+
+
+
+```{r}
+density_data <- data.frame()
+
+predictors <- c("vmi_baseline", "vmi_qwenzt", "vmi_qwenft", "vmi_transocr")
+languages <- c("ZH", "EN")
+measures <- c("gaze_duration", "total_duration", "go_past_time")
+
+for (p in predictors) {
+  for (l in languages) {
+    for (m in measures) {
+      dummy_df <- rt_mi_agg %>%
+        filter(language == l, measure == m) %>%
+        filter(!stim_id %in% c("t4", "t5")) %>%
+        dplyr::select(x = all_of(p)) %>%
+        filter(!is.na(x), x > 0)
+      # if (l == "EN") {
+      #   dummy_df <- dummy_df %>% filter(x >= 4 & x <= 7)
+      # } else {
+      #   dummy_df <- dummy_df %>% filter(x >= 2.5 & x <= 5.5)
+      # }
+
+      dummy_df <- dummy_df %>%
+        mutate(
+          language = l,
+          predictor = p,
+          psychometric = m
+        )
+      density_data <- bind_rows(density_data, dummy_df)
+    }
+  }
+}
+
+# write.csv(density_data, "./precomputed/vmi_density_range_zero.csv")
+
+```
+
+
+```{r}
+plot_df <- read.csv("./precomputed/vmi_rt_relation_range_zero.csv") %>%
+  mutate(
+    language = factor(language, levels = c("ZH", "EN")),
+    psychometric = factor(
+      psychometric,
+      levels = c("gaze_duration", "total_duration", "go_past_time"),
+      labels = c("Gaze Duration", "Total Duration", "Go-past Time")
+    ),
+    predictor = factor(
+      predictor,
+      levels = c("vmi_baseline", "vmi_qwenzt", "vmi_qwenft", "vmi_transocr"),
+      labels = c("Baseline", "Qwen2.5-Zeroshot", "Qwen2.5-Finetuned", "TransOCR")
+    )
+  ) %>%
+  filter(psychometric == "Gaze Duration") %>%
+  filter(
+    !(predictor == "Baseline" & language == "ZH" & range < 0.8),
+    !(predictor == "Baseline" & language == "EN" & range < 2.5),
+    !(predictor == "Qwen2.5-Finetuned" & language == "EN" & range < 1.5),
+    !(predictor == "TransOCR" & language == "EN" & range < 3),
+  )
+# View(plot_df)
+
+density_data <- read.csv("./precomputed/vmi_density_range_zero.csv") %>%
+    mutate(
+    language = factor(language, levels = c("ZH", "EN")),
+    psychometric = factor(psychometric, levels = c("gaze_duration", "total_duration", "go_past_time"), labels=c("Gaze Duration", "Total Duration", "Go-past Time")),
+    predictor = factor(predictor, levels = c("vmi_baseline", "vmi_qwenzt", "vmi_qwenft", "vmi_transocr"), labels = c("Baseline", "Qwen2.5-Zeroshot", "Qwen2.5-Finetuned", "TransOCR"))
+  ) %>%
+  filter(psychometric == "Gaze Duration")
+
+# View(density_data)
+```
+
+```{r}
+ggplot() +
+    geom_rug(data = density_data, aes(x = x), sides = "b", length = unit(0.08, "npc"), linewidth = 0.08, alpha = 0.1,color = "#FC8D62") +
+  geom_line(data = plot_df, aes(x = range, y = y), size = 0.6, color = "#4C72B0" ) +
+  geom_ribbon(data = plot_df, aes(x = range, ymin = y_lower, ymax = y_upper), alpha = 0.4, fill = "#8DA0CB", size = 0.7) +
+  facet_wrap(vars(language, predictor), scales = "free", nrow = 2, ncol = 4) +
+  ylab("Excess Reading Time (ms)") +
+  xlab("IG of Word Identity and Visual Input (nats)") +
+  theme_light(base_size = 12) +
+  theme(
+    strip.background = element_rect(fill = "gray85", color = "black", linewidth = 1),
+    strip.text = element_text(size = 9, color = "black"),
+    axis.text.x = element_text(size = 10),
+    axis.text.y = element_text(size = 10),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("./visualization/rt_visual_mi_link.pdf", width = 8, height = 4)
+
+
+```
