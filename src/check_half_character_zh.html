@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中文字上下分割</title>
+    <style>
+        /* 容器样式 */
+        .char-container {
+            position: relative;
+            display: inline-block;
+            font-size: 100px; /* 字体大小 */
+            font-weight: bold;
+            line-height: 100px; /* 确保上下对齐 */
+            width: 500px;
+            height: 100px;
+            overflow: hidden;
+            background-color: yellow;
+        }
+
+        /* 上半部分 */
+        .top-half {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            text-align: center;
+            clip-path: inset(0 0 50% 0); /* 仅显示上半部分 */
+            color: white; /* 上半部分颜色 */
+        }
+
+        /* 下半部分 */
+        .bottom-half {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            bottom: 0;
+            text-align: center;
+            clip-path: inset(50% 0 0 0); /* 仅显示下半部分 */
+            color: blue; /* 下半部分颜色 */
+        }
+    </style>
+</head>
+<body>
+
+    <div class="char-container">
+        <div class="top-half">oblique</div>
+        <div class="bottom-half">oblique</div>
+    </div>
+
+    <div class="char-container">
+        <div class="top-half">一</div>
+        <div class="bottom-half">一</div>
+    </div>
+    
+        <div class="char-container">
+        <div class="top-half">田</div>
+        <div class="bottom-half">田</div>
+    </div>
+
+    <div class="char-container">
+        <div class="top-half">十</div>
+        <div class="bottom-half">十</div>
+    </div>
+    
+            <div class="char-container">
+        <div class="top-half">语</div>
+        <div class="bottom-half">语</div>
+    </div>
+
+    <div class="char-container">
+        <div class="top-half">义</div>
+        <div class="bottom-half">义</div>
+    </div>
+
+</body>
+</html>

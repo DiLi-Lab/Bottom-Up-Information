@@ -1,0 +1,4 @@
+jupterlab
+ipykernel
+matplotlib
+seaborn
