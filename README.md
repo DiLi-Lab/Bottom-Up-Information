@@ -3,7 +3,7 @@
 
 # Modeling Bottom-Up Information Quality During Language Processing
 
-[![Paper EMNLP 2025](http://img.shields.io/badge/paper-arxiv.2206.08672-B31B1B.svg)](https://arxiv.org/...)
+[![Paper EMNLP 2025](http://img.shields.io/badge/paper-arxiv.2206.08672-B31B1B.svg)](https://arxiv.org/pdf/2509.17047)
 
 </div>
 
